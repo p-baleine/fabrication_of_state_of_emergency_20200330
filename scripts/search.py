@@ -9,15 +9,15 @@ Twitter API から検索して、データベース に格納します。
 """
 
 import click
+import functools
 import logging
 import mysql.connector
 from operator import attrgetter
 import os
 from pypika import MySQLQuery as Query, Table
-from pypika.terms import Values
+from pypika.terms import Parameter, Values
 import time
 import twitter
-import unicodedata
 import urllib
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,9 @@ database_config = {
 def bulk_search(term, max_id, since, count, lang,
                 sleep_seconds=15 * 60 // 180):
     """`count` 個の tweet のリストを毎回 yield します"""
-    oldest_id = '1244640592367251456'  # Mon Mar 30 15:00:16 +0000 2020 の tweet
+    # Mon Mar 30 15:00:16 +0000 2020 の tweet
+    # oldest_id = '1244640592367251456'
+    oldest_id = '1244585210429108227'
     oldest_created_at = '2020-12-31'  # FIXME: ここらへん、直値やめて
 
     while oldest_created_at > since:
@@ -92,36 +94,22 @@ def search(cnx, term, since, count=100, lang='ja'):
     for result in bulk_search(term, None, since, count, lang):
         users = [s.user for s in result]
         sqls = [
-            insert_users_sql(users),
-            insert_tweets_sql(result),
+            functools.partial(insert_users_sql, users),
+            functools.partial(insert_tweets_sql, result),
         ]
         cursor = cnx.cursor()
 
         try:
             for sql in sqls:
-                logger.debug(format_sql_for_logging(sql))
-                cursor.execute(sql)
+                stmt, data = sql()
+                logger.debug(format_sql_for_logging(stmt))
+                cursor.executemany(stmt, data)
             cnx.commit()
         except Exception as e:
             cnx.rollback()
             raise e
         finally:
             cursor.close()
-
-
-def replace_nul_str(text):
-    # See: https://gist.github.com/jeremyBanks/1083518
-    encodable = text.encode('utf-8', 'ignore').decode('utf-8')
-    if encodable.find('\x00') >= 0:
-        logger.error('{} contains nul character.'.format(encodable))
-        encodable = encodable.replace('\x00', '')
-    return encodable
-
-
-def normalize(text):
-    if type(text) is not str:
-        return text
-    return unicodedata.normalize('NFD', replace_nul_str(text))
 
 
 def insert_users_sql(users):
@@ -133,14 +121,15 @@ def insert_users_sql(users):
     def params_of(user):
         created_at = ctime_to_mysql_datetime(user.created_at)
         values = getter(user) + (created_at,)
-        return tuple(map(normalize, values))
+        return values
 
-    return str(
-        Query.into(table)
-        .columns(field + ['created_at'])
-        .insert(*[params_of(u) for u in users])
-        .on_duplicate_key_update(
-            table.screen_name, Values(table.screen_name)))
+    return (
+        str(Query.into(table)
+            .columns(field + ['created_at'])
+            .insert(*[Parameter('%s') for _ in range(len(field) + 1)])
+            .on_duplicate_key_update(
+                table.screen_name, Values(table.screen_name))),
+        [params_of(u) for u in users])
 
 
 def insert_tweets_sql(tweets):
@@ -158,14 +147,16 @@ def insert_tweets_sql(tweets):
         created_at = ctime_to_mysql_datetime(tweet.created_at)
         values = getter(tweet) + \
             (tweet.user.id, raw_json, retweeted_status, created_at)
-        return list(map(normalize, values))
+        return values
 
-    return str(
-        Query.into(table)
-        .columns(field + extra_field)
-        .insert(*[params_of(t) for t in tweets])
-        .on_duplicate_key_update(
-            table.lang, Values(table.lang)))
+    return (
+        str(Query.into(table)
+            .columns(field + extra_field)
+            .insert(*[Parameter('%s') for _
+                      in range(len(field) + len(extra_field))])
+            .on_duplicate_key_update(
+                table.lang, Values(table.lang))),
+        [params_of(t) for t in tweets])
 
 
 def ctime_to_mysql_datetime(text):
@@ -187,7 +178,7 @@ def prepare_tables(cnx):
 create table if not exists users (
   id bigint auto_increment not null primary key,
   created_at datetime not null,
-    description varchar(1200),
+  description varchar(1200),
   followers_count integer,
   friends_count integer,
   statuses_count integer,
@@ -217,7 +208,7 @@ alter table tweets add index idx_tweets_created_at(created_at)
 @click.command()
 @click.option('--reset-db', default=False)
 def main(reset_db):
-    since = '2020-03-29 15:00'
+    since = '2020-03-28 15:00'
     query = os.environ.get('QUERY', DEFAULT_QUERY)
 
     cnx = mysql.connector.connect(**database_config)
