@@ -21,7 +21,11 @@ import urllib
 logger = logging.getLogger(__name__)
 
 # 検索のキーワード
-DEFAULT_QUERY = 'ロックダウン OR 緊急事態宣言 OR 4月1日'
+DEFAULT_QUERY = ' OR '.join([
+    'ロックダウン',
+    '都市封鎖',
+    '緊急事態宣言',
+    '4月1日'])
 
 # 環境変数に TWITTER_API_KEY とかが設定してある想定
 api = twitter.Api(
@@ -34,7 +38,8 @@ api = twitter.Api(
 def bulk_search(term, max_id, since, count, lang,
                 sleep_seconds=15 * 60 // 180):
     """`count` 個の tweet のリストを毎回 yield します"""
-    oldest_id = max_id
+    oldest_id = '1244640592367251456'  # Mon Mar 30 15:00:16 +0000 2020 の tweet
+    # 1244636860384563200 ここから
     oldest_created_at = '2020-12-31'  # FIXME: 直値やめて
 
     while oldest_created_at > since:
@@ -75,6 +80,17 @@ def search(conn, term, since, count=100, lang='ja'):
             conn.execute(insert_tweets_sql(result))
 
 
+def replace_nul_str(text):
+    # See: https://gist.github.com/jeremyBanks/1083518
+    if type(text) is not str:
+        return text
+    encodable = text.encode('utf-8', 'ignore').decode('utf-8')
+    if encodable.find('\x00') >= 0:
+        logger.error('{} contains nul character.'.format(encodable))
+        encodable = encodable.replace('\x00', '')
+    return encodable
+
+
 def insert_users_sql(users):
     field = ['id', 'created_at', 'description', 'followers_count',
              'friends_count', 'statuses_count', 'screen_name']
@@ -82,16 +98,20 @@ def insert_users_sql(users):
     return str(Query.into(Table('users'))
                .columns(field)
                # 面倒だから replace
-               .replace(*[getter(u) for u in users]))
+               .replace(*[list(map(replace_nul_str, getter(u)))
+                          for u in users]))
 
 
 def insert_tweets_sql(tweets):
     field = ['id', 'created_at', 'retweet_count', 'favorite_count',
              'lang', 'text']
     getter = attrgetter(*field)
-    return str(Query.into(Table('tweets'))
-               .columns(field + ['tweeted_by', 'raw_json'])
-               .replace(*[getter(t) + (t.user.id, str(t)) for t in tweets]))
+    return str(
+        Query.into(Table('tweets'))
+        .columns(field + ['tweeted_by', 'raw_json', 'retweeted_status'])
+        .replace(*[list(map(replace_nul_str, getter(t)
+                            + (t.user.id, str(t), str(t.retweeted_status))))
+                   for t in tweets]))
 
 
 def prepare_database(conn):
@@ -113,6 +133,7 @@ create table tweets (
   favorite_count integer,
   lang text,
   text text,
+  retweeted_status text,
   raw_json text,
   tweeted_by integer not null,
   foreign key(tweeted_by) references users(id))
@@ -135,7 +156,8 @@ def main(db):
 
 
 if __name__ == '__main__':
-    logging.basicConfig()
+    logging.basicConfig(
+        format='%(asctime)s - %(levelname)s - %(message)s')
     logger.setLevel(level=logging.DEBUG)
     # logging.getLogger('twitter.api').setLevel(level=logging.DEBUG)
     main()
