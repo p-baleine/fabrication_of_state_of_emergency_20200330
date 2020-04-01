@@ -9,6 +9,12 @@ verify_ssl = true
 python-twitter = "*"
 click = "*"
 pypika = "*"
+notebook = "*"
+numpy = "*"
+pandas = "*"
+sklearn = "*"
+matplotlib = "*"
+mysql-connector-python = "*"
 
 [requires]
 python_version = "3.8"
