@@ -1,0 +1,47 @@
+#+TITLE: 「4月1日に緊急事態宣言」の拡散の推移について
+
+2020/03/30 の噂ー「4月 1 日に緊急事態宣言」の拡散について調べてみた。
+データとしては Twitter の検索 API の結果を利用している。(そのため偏りがあると思われ
+る。)
+現状は「データの取得」に記載の方法で、〜2020/03/30 24:00 の範囲で、
+「ロックダウン OR 都市封鎖 OR 緊急事態宣言」のキーワードで検索した結果の tweet を対
+象としている。
+
+* データの取得
+Twitter からデータをもらってくる。データは MySQL に格納している。
+
+** DB の準備
+#+begin_src bash
+docker run --name db -e MYSQL_ROOT_PASSWORD=root \
+-e MYSQL_DATABASE=twitter -p 3306:3306 \
+--volume $(pwd)/data/mysql:/var/lib/mysql \
+--volume $(pwd)/db/mysql:/etc/mysql/conf.d \
+--rm mysql:8
+#+end_src
+
+中身を確認したいときは
+
+#+begin_src bash
+docker exec -it db mysql -u root -proot twitter
+#+end_src
+
+** 動かし方
+#+begin_src bash
+python scripts/search.py 2>&1 | tee -a log/search_$(date +'%s').log
+#+end_src
+
+* メモ
+- 仮定
+  - 4/1 が近いため、元々そういう噂はあったと思っている
+  - なので、いつ、どのタイミングでバズったのかが気になる
+  - わかり易いところだと、小池さんの「記者会見 20 時からやるよ!」宣言
+  - でも、NHK の記事のタイムスタンプから判断すると、小池さんの発表とお菅さんの発
+    表には 20 分程度しか間がない、まさかここで一気にばずるとも思えない
+- トレンドとか知りたいけどなー
+- 最初にバズった人のフォロワー数とエンゲージメント数の相関とか見てみたいなー
+- どーでも良いんだけど、Twitter で表示しているトレンドを Twitter が弄ってなにが
+  わるいんだろうな？？？あんな日々刻々と変化するもの、忖度はできても金はとれまい
+  に
+- Google Trend、ダウンロードさせてくれるんだ
+   - でもやはり、なぜ 30 日の 17 時にピークをむかえているんだろう？？？？
+     30 日の最初の山は 8 時付近何があったの？？？
