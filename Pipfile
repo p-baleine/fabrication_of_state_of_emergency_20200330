@@ -15,6 +15,7 @@ pandas = "*"
 sklearn = "*"
 matplotlib = "*"
 mysql-connector-python = "*"
+statsmodels = "*"
 
 [requires]
 python_version = "3.8"
